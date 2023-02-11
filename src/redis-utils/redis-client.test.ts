@@ -51,16 +51,13 @@ describe("Redis Client", () => {
     let getvalue = await counter.get();
     expect(getvalue).toEqual(value);
 
-    await counter.incr();
-    getvalue = await counter.get();
+    getvalue = await counter.incr();
     expect(getvalue).toEqual(100);
 
-    await counter.incr(20);
-    getvalue = await counter.get();
+    getvalue = await counter.incr(20);
     expect(getvalue).toEqual(120);
 
-    await counter.decr(33);
-    getvalue = await counter.get();
+    getvalue = await counter.decr(33);
     expect(getvalue).toEqual(120 - 33);
 
     await client.close();
@@ -96,19 +93,62 @@ describe("Redis Client", () => {
     await client.close();
   });
 
-  test("using string helper", async () => {
+  test("using cache helper", async () => {
     const client = await createRedisClient({ url: "redis://127.0.0.1:6379/0" });
     expect(client.ioredis).not.toBeNull();
 
-    const key = "test:string";
+    const key = "test:cache";
     const value = "1234567890";
-    const redisString = client.string(key);
+    const cache = await client.cache(key, value);
 
-    await redisString.set(value);
+    // await redisString.set(value);
 
-    const getvalue = await redisString.get();
+    const getvalue = await cache.get();
 
     expect(getvalue).toEqual(value);
+
+    await client.close();
+  });
+
+  test("using lock helper", async () => {
+    const client = await createRedisClient({ url: "redis://127.0.0.1:6379/0" });
+    expect(client.ioredis).not.toBeNull();
+
+    const key = "test:lock:AACCDD";
+    await client.ioredis.del(key);
+
+    const seconds = 30;
+    const lock = await client.lock(key, seconds);
+    expect(lock).not.toBeNull();
+
+    const another = await client.lock(key, seconds);
+    expect(another).toBeNull();
+
+    await lock!.release();
+
+    const another2 = await client.lock(key, seconds);
+    expect(another2).not.toBeNull();
+
+    await client.close();
+  });
+
+  test("using throttle helper", async () => {
+    const client = await createRedisClient({ url: "redis://127.0.0.1:6379/0" });
+    expect(client.ioredis).not.toBeNull();
+
+    const key = "test:throttle:AACCDD";
+    await client.ioredis.del(key);
+
+    const seconds = 60;
+    const throttle = client.throttle(key, 1000, seconds);
+
+    for (let i = 0; i < 500; i++) {
+      const over = await throttle.incr();
+      expect(over).toBeFalsy();
+    }
+
+    const over = await throttle.incr(501);
+    expect(over).toBeTruthy();
 
     await client.close();
   });
@@ -209,6 +249,27 @@ describe("Redis Client", () => {
     const keys = await hashset.keys();
     expect(keys.length).toBe(6);
     expect(keys).toContain("country");
+
+    await client.close();
+  });
+
+  test("using serial helper", async () => {
+    const client = await createRedisClient({ url: "redis://127.0.0.1:6379/0" });
+    expect(client.ioredis).not.toBeNull();
+
+    const key = "test:serial";
+    await client.ioredis.del(key);
+
+    const serial = client.serial(key);
+    let num = await serial.getOne("xyzYYMM");
+    expect(num).toEqual(1);
+
+    num = await serial.getOne("xyzYYMM");
+    expect(num).toEqual(2);
+
+    let nums = await serial.getMany("xyzYYMM", 5);
+    expect(nums.length).toEqual(5);
+    expect(nums).toEqual([3, 4, 5, 6, 7]);
 
     await client.close();
   });
